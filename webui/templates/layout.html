@@ -1,0 +1,28 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{.Title}} · {{.Site}}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/static/favicon.svg">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">{{.Site}}</a>
+  <nav>
+    <a href="/"{{if eq .Nav "overview"}} aria-current="page"{{end}}>Overview</a>
+    <a href="/days"{{if eq .Nav "days"}} aria-current="page"{{end}}>Browse</a>
+  </nav>
+  <span class="ro" title="This UI cannot change or delete anything">read-only</span>
+</header>
+<main>
+{{end}}
+
+{{define "foot"}}
+</main>
+<footer>logs-webui {{.Version}}</footer>
+</body>
+</html>
+{{end}}

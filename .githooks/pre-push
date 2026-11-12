@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# pre-push: nothing leaves this clone unless all checks pass.
+#   1. gitleaks over the whole history
+#   2. no string from private-denylist.txt in files, names, messages or history
+#   3. generic public-repository checks (private IPs, site files, log files)
+#   4. every commit uses a GitHub noreply address
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-push: gitleaks is not installed. Install it (https://github.com/gitleaks/gitleaks) and push again." >&2
+    exit 1
+fi
+gitleaks git --redact --no-banner --config .gitleaks.toml
+scripts/check-denylist.sh
+scripts/check-public.sh
+
+emails=$(git log --all --format='%ae%n%ce' | sort -u | grep -v -E '@users\.noreply\.github\.com$|^noreply@github\.com$' || true)
+if [ -n "$emails" ]; then
+    echo "pre-push: commits with a non-noreply e-mail address found:" >&2
+    printf '    %s\n' "$emails" >&2
+    echo "  Set: git config user.email '<id>+<user>@users.noreply.github.com' and rewrite those commits." >&2
+    exit 1
+fi
+echo "pre-push: all checks passed"

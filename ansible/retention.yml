@@ -1,0 +1,57 @@
+---
+# Compress raw days older than logs_raw_days into archive/YYYY/YYYY-MM-DD.tar.zst,
+# verify each archive before the raw directory is deleted, then expire old archives.
+#
+#   ansible-playbook retention.yml
+#   ansible-playbook retention.yml --check     # only show what would happen
+
+- name: Apply the retention rules
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_become: false  # local work never needs root, whatever the inventory sets
+  roles:
+    - logs_defaults
+  tasks:
+    - name: Find the filesystem type of the log root
+      ansible.builtin.command: df --output=fstype {{ logs_root | quote }}
+      register: logs_fstype
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Refuse to run when the share is not mounted
+      ansible.builtin.assert:
+        that: logs_root_fstypes | length == 0 or (logs_fstype.stdout_lines | default(['unknown']) | last | trim) in logs_root_fstypes
+        fail_msg: >-
+          {{ logs_root }} is on filesystem "{{ logs_fstype.stdout_lines | default(['unknown']) | last | trim }}", expected one of
+          {{ logs_root_fstypes }}. Is the share mounted?
+        quiet: true
+
+    - name: Read today's date
+      ansible.builtin.command: date +%F
+      environment: "{{ {'TZ': logs_timezone} if logs_timezone else {} }}"
+      register: logs_today
+      changed_when: false
+      check_mode: false
+
+    - name: Archive old raw days and expire old archives
+      logs_retention:
+        root: "{{ logs_root }}"
+        today: "{{ logs_retention_today | default(logs_today.stdout) }}"
+        raw_days: "{{ logs_raw_days }}"
+        archive_days: "{{ logs_archive_days }}"
+        archive_max_bytes: "{{ (logs_archive_max_gb | float * 1024 * 1024 * 1024) | int }}"
+        zstd_level: "{{ logs_zstd_level }}"
+        zstd_window_log: "{{ logs_zstd_window_log }}"
+        zstd_threads: "{{ logs_zstd_threads }}"
+      register: logs_retention_result
+
+    - name: Show the result
+      ansible.builtin.debug:
+        msg:
+          archived: "{{ logs_retention_result.archived }}"
+          raw_removed: "{{ logs_retention_result.removed_raw }}"
+          archives_expired: "{{ logs_retention_result.expired }}"
+          archive_size: "{{ logs_retention_result.archive_bytes | human_readable }}"

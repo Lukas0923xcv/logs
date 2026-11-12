@@ -1,0 +1,58 @@
+---
+# Site settings for the collector and retention playbooks.
+#
+# Copy to group_vars/all.yml next to your inventory and change what you need
+# (install.sh puts a copy in /etc/logs/group_vars/all.yml). The real file is
+# git-ignored. Everything is optional: the values below are the defaults.
+# With Semaphore, put the same keys in a variable group instead.
+#
+# Never put passwords here. The SMTP password comes from the environment
+# variable LOGS_SMTP_PASSWORD.
+
+# --- where the logs go -------------------------------------------------------
+#logs_root: /mnt/logs-rw             # read-write mount of the share
+#logs_root_fstypes: [cifs, smb3]     # refuse to write anywhere else; [] = any filesystem
+
+# --- what to collect ---------------------------------------------------------
+#logs_targets: all                   # Ansible host pattern, e.g. "webservers:!staging"
+#logs_collect_localhost: false       # also collect the collector host itself
+#logs_localhost_name: collector      # its name in the archive
+#logs_localhost_become: true         # false: no sudo; the user must be in systemd-journal (and docker)
+#logs_timezone: ""                   # e.g. Europe/Berlin; empty = time zone of the collector
+#logs_journal: auto                  # auto | yes | no
+#logs_journal_format: short-iso-precise
+#logs_docker: auto                   # auto | yes | no
+#logs_count_levels: true
+
+# Extra log files, usually set per host in the inventory (host_vars):
+#logs_extra_files:
+#  - /var/log/nginx/access.log
+#  - /var/log/myapp/*.log
+# ... or for all hosts at once, keyed by inventory hostname:
+#logs_extra_files_by_host:
+#  web01.example.com:
+#    - /var/log/nginx/access.log
+
+# --- logs that arrive without Ansible ----------------------------------------
+#logs_push_hosts: []                 # hosts that push with helpers/logs-push.sh, e.g. [hypervisor01]
+#logs_syslog_spool: ""               # e.g. /var/spool/logs-syslog (rsyslog_receiver role)
+#logs_syslog_names: {}               # e.g. {"192.0.2.1": "firewall"}
+#logs_syslog_keep_days: 7
+
+# --- retention ---------------------------------------------------------------
+#logs_raw_days: 60                   # days kept uncompressed
+#logs_archive_days: 0                # delete archives older than this; 0 = keep forever
+#logs_archive_max_gb: 0              # delete oldest archives above this size; 0 = no cap
+#logs_zstd_level: 19
+#logs_zstd_window_log: 25            # see README "Retention" before raising it
+#logs_zstd_threads: 1
+
+# --- notification when a host failed -----------------------------------------
+#logs_fail_on_host_failure: true     # mark the run as failed (visible in Semaphore / systemctl)
+#logs_notify_on_failure: false
+#logs_smtp_host: smtp.example.com
+#logs_smtp_port: 587
+#logs_smtp_security: starttls        # starttls | tls | none
+#logs_smtp_user: logcollector@example.com
+#logs_smtp_from: logcollector@example.com
+#logs_smtp_to: [admin@example.com]

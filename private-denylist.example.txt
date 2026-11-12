@@ -1,0 +1,25 @@
+# Format of private-denylist.txt
+#
+# Copy this file to private-denylist.txt (git-ignored) and list every string
+# of your own setup that must never appear in this public repository:
+# IP addresses, your domain, hostnames, usernames, e-mail addresses, share
+# names and paths.
+#
+#   - one string per line, matched anywhere, ignoring upper/lower case
+#   - lines starting with # and empty lines are ignored
+#   - no wildcards or regular expressions: every line is taken literally
+#   - at least 4 characters per line (shorter strings match too much);
+#     write short identifiers with context, e.g. "vm 123" instead of "123"
+#
+# scripts/check-denylist.sh (run by the pre-commit and pre-push hooks) fails
+# when a tracked file, a file name, a commit message or any commit in the
+# history contains one of the strings.
+#
+# The lines below only show the format. They use documentation values.
+
+192.0.2.17
+198.51.100.
+internal.example.com
+nas01.example.com
+logcollector@example.com
+/mnt/tank/example-share

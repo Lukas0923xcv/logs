@@ -1,0 +1,307 @@
+---
+# Collect one day of logs from every host and write the day's manifest.
+#
+#   ansible-playbook -i inventory.yml collect.yml
+#   ansible-playbook -i inventory.yml collect.yml -e logs_day=2025-01-31
+#
+# A host that is unreachable or fails is recorded in the manifest; the
+# other hosts carry on.
+
+- name: Prepare the collection window
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_become: false  # local work never needs root, whatever the inventory sets
+  roles:
+    - logs_defaults
+  tasks:
+    - name: Find the filesystem type of the log root
+      ansible.builtin.command: df --output=fstype {{ logs_root | quote }}
+      register: logs_fstype
+      changed_when: false
+      failed_when: false
+
+    - name: Refuse to write when the share is not mounted
+      ansible.builtin.assert:
+        that: logs_root_fstypes | length == 0 or (logs_fstype.stdout_lines | default(['unknown']) | last | trim) in logs_root_fstypes
+        fail_msg: >-
+          {{ logs_root }} is on filesystem "{{ logs_fstype.stdout_lines | default(['unknown']) | last | trim }}", expected one of
+          {{ logs_root_fstypes }}. Is the share mounted? (Set logs_root_fstypes: [] to skip this check.)
+        quiet: true
+
+    - name: Work out the day and its exact window
+      ansible.builtin.shell: |
+        set -eu
+        day="{{ logs_day }}"
+        [ -n "$day" ] || day=$(date -d yesterday +%F)
+        day=$(date -d "$day" +%F)
+        since=$(date -d "$day 00:00:00" +%s)
+        next=$(date -d "$day 00:00:00 +1 day" +%s)
+        echo "$day $since $((next - 1))"
+      args:
+        executable: /bin/sh
+      environment: "{{ {'TZ': logs_timezone} if logs_timezone else {} }}"
+      register: logs_window_cmd
+      changed_when: false
+
+    - name: Remember the window
+      ansible.builtin.set_fact:
+        logs_w:
+          day: "{{ logs_window_cmd.stdout.split()[0] }}"
+          since: "{{ logs_window_cmd.stdout.split()[1] | int }}"
+          until: "{{ logs_window_cmd.stdout.split()[2] | int }}"
+          raw: "{{ logs_root }}/raw/{{ logs_window_cmd.stdout.split()[0] | replace('-', '/') }}"
+          parts: "{{ logs_root }}/manifests/{{ logs_window_cmd.stdout[0:4] }}/.parts/{{ logs_window_cmd.stdout.split()[0] }}"
+        logs_pattern: "{{ logs_targets }}{{ ',logs_collector_local' if logs_collect_localhost | bool else '' }}"
+
+    - name: Refuse to collect a day that is not over yet
+      ansible.builtin.assert:
+        that: logs_w.until | int < now().strftime('%s') | int
+        fail_msg: "{{ logs_w.day }} has not ended yet; only complete days are collected."
+        quiet: true
+
+    - name: Create the day's directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0750"
+      loop:
+        - "{{ logs_w.raw }}"
+        - "{{ logs_w.parts }}"
+
+    - name: Add the collector itself as a host
+      ansible.builtin.add_host:
+        name: "{{ logs_localhost_name }}"
+        groups: logs_collector_local
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+        ansible_become: "{{ logs_localhost_become | bool }}"
+      when: logs_collect_localhost | bool
+      changed_when: false
+
+- name: Collect logs
+  hosts: "{{ hostvars['localhost'].logs_pattern | default('all') }}"
+  gather_facts: false
+  roles:
+    - logs_defaults
+  vars:
+    logs_w: "{{ hostvars['localhost'].logs_w }}"
+    logs_name: "{{ inventory_hostname | regex_replace('[^A-Za-z0-9._-]', '_') }}"
+    logs_part: "{{ logs_w.parts }}/{{ logs_name }}.json"
+    logs_stage: "{{ logs_w.raw }}/.{{ logs_name }}.partial"
+    logs_remote_dir: "{{ logs_remote_tmp }}/{{ logs_name }}-{{ logs_w.day }}"
+  tasks:
+    - name: Look for an earlier result of this day
+      ansible.builtin.slurp:
+        src: "{{ logs_part }}"
+      delegate_to: localhost
+      vars:
+        ansible_become: false
+      register: logs_earlier
+      failed_when: false
+
+    - name: Skip hosts that were already collected
+      ansible.builtin.meta: end_host
+      when:
+        - not logs_force | bool
+        - logs_earlier.content is defined
+        - (logs_earlier.content | b64decode | from_json).status | default('') == 'ok'
+
+    - name: Collect, fetch and record
+      ignore_unreachable: true
+      block:
+        - name: Check the connection
+          ansible.builtin.command: id -un
+          register: logs_login
+          changed_when: false
+          vars:
+            ansible_become: false
+
+        - name: Stop here when the host is unreachable
+          ansible.builtin.fail:
+            msg: "unreachable: {{ logs_login.msg | default('no connection') }}"
+          when: logs_login.unreachable | default(false)
+
+        - name: Export the day's logs on the host
+          logs_collect:
+            day: "{{ logs_w.day }}"
+            since: "{{ logs_w.since }}"
+            until: "{{ logs_w.until }}"
+            dest: "{{ logs_remote_dir }}"
+            owner: "{{ logs_login.stdout }}"
+            journal: "{{ logs_journal }}"
+            journal_format: "{{ logs_journal_format }}"
+            docker: "{{ logs_docker }}"
+            extra_files: "{{ logs_extra_files + (logs_extra_files_by_host[inventory_hostname] | default([])) }}"
+            state_dir: "{{ logs_remote_state_dir }}"
+            count_levels: "{{ logs_count_levels }}"
+          become: true
+          register: logs_result
+
+        - name: Stop here when the export did not run
+          ansible.builtin.fail:
+            msg: "unreachable during the export"
+          when: logs_result.unreachable | default(false)
+
+        - name: Empty the staging directory on the collector
+          ansible.builtin.file:
+            path: "{{ logs_stage }}"
+            state: "{{ item }}"
+            mode: "0750"
+          loop: [absent, directory]
+          delegate_to: localhost
+          vars:
+            ansible_become: false
+
+        - name: Fetch the files
+          ansible.builtin.fetch:
+            src: "{{ logs_remote_dir }}/{{ item }}"
+            dest: "{{ logs_stage }}/"
+            flat: true
+            validate_checksum: true
+          loop: "{{ logs_result.files }}"
+          vars:
+            ansible_become: false  # plain sftp/scp streams the file; with become it would be read into memory
+          register: logs_fetch
+
+        - name: Stop here when a file could not be fetched
+          ansible.builtin.fail:
+            msg: "unreachable while fetching files"
+          when: logs_fetch.results | default([]) | selectattr('unreachable', 'defined') | list | length > 0
+
+        - name: Put the host's directory in place
+          ansible.builtin.shell: |
+            set -eu
+            rm -rf -- {{ (logs_w.raw ~ '/' ~ logs_name) | quote }}
+            mv -- {{ logs_stage | quote }} {{ (logs_w.raw ~ '/' ~ logs_name) | quote }}
+          args:
+            executable: /bin/sh
+          delegate_to: localhost
+          vars:
+            ansible_become: false
+          changed_when: true
+
+        - name: Record the result
+          ansible.builtin.copy:
+            content: "{{ logs_record | to_nice_json }}\n"
+            dest: "{{ logs_part }}"
+            mode: "0640"
+          delegate_to: localhost
+          vars:
+            ansible_become: false
+            logs_record:
+              status: "{{ 'ok' if logs_result.failed_sources | length == 0 else 'partial' }}"
+              origin: ansible
+              error: ""
+              sources: "{{ logs_result.sources }}"
+
+      rescue:
+        - name: Record the failure
+          ansible.builtin.copy:
+            content: "{{ logs_record | to_nice_json }}\n"
+            dest: "{{ logs_part }}"
+            mode: "0640"
+          delegate_to: localhost
+          vars:
+            ansible_become: false
+            logs_record:
+              status: failed
+              origin: ansible
+              error: >-
+                {{ (ansible_failed_task.name | default('task')) ~ ': ' ~
+                   (ansible_failed_result.msg | default('failed') | string | truncate(500)) }}
+              sources: []
+
+        - name: Remove the unfinished staging directory
+          ansible.builtin.file:
+            path: "{{ logs_stage }}"
+            state: absent
+          delegate_to: localhost
+          vars:
+            ansible_become: false
+
+      always:
+        - name: Remove the staging directory on the host
+          ansible.builtin.file:
+            path: "{{ logs_remote_dir }}"
+            state: absent
+          become: true
+          ignore_errors: true
+          ignore_unreachable: true
+          when: logs_login.stdout is defined
+
+- name: Write the manifest
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_become: false  # local work never needs root, whatever the inventory sets
+  roles:
+    - logs_defaults
+  tasks:
+    - name: Write the manifest of the day
+      logs_manifest:
+        root: "{{ logs_root }}"
+        day: "{{ logs_w.day }}"
+        since: "{{ logs_w.since }}"
+        until: "{{ logs_w.until }}"
+        timezone: "{{ logs_timezone }}"
+        expected_hosts: >-
+          {{ query('ansible.builtin.inventory_hostnames', logs_pattern)
+             | map('regex_replace', '[^A-Za-z0-9._-]', '_') | list }}
+        push_hosts: "{{ logs_push_hosts }}"
+        syslog_spool: "{{ logs_syslog_spool | default(omit, true) }}"
+        syslog_names: "{{ logs_syslog_names }}"
+        syslog_keep_days: "{{ logs_syslog_keep_days }}"
+        count_levels: "{{ logs_count_levels }}"
+      register: logs_manifest_result
+
+    - name: Show the result
+      ansible.builtin.debug:
+        msg:
+          day: "{{ logs_w.day }}"
+          manifest: "{{ logs_manifest_result.manifest }}"
+          totals: "{{ logs_manifest_result.totals }}"
+          problem_hosts: "{{ logs_manifest_result.problem_hosts }}"
+
+    - name: Send a mail about hosts with problems
+      logs_notify:
+        host: "{{ logs_smtp_host }}"
+        port: "{{ logs_smtp_port }}"
+        security: "{{ logs_smtp_security }}"
+        username: "{{ logs_smtp_user | default(omit, true) }}"
+        password: "{{ lookup('ansible.builtin.env', 'LOGS_SMTP_PASSWORD') | default(omit, true) }}"
+        sender: "{{ logs_smtp_from }}"
+        recipients: "{{ logs_smtp_to }}"
+        subject: "Log collection {{ logs_w.day }}: {{ logs_manifest_result.problem_hosts | length }} host(s) with problems"
+        body: |
+          Log collection for {{ logs_w.day }} finished with problems.
+
+          {% for host, reason in logs_manifest_result.problem_hosts.items() %}
+          - {{ host }}: {{ reason }}
+          {% endfor %}
+
+          Hosts ok: {{ logs_manifest_result.totals.hosts_ok }}
+          Manifest: {{ logs_manifest_result.manifest }}
+
+          Run the collector again for that day to retry only the failed hosts:
+            ansible-playbook collect.yml -e logs_day={{ logs_w.day }}
+      when:
+        - logs_notify_on_failure | bool
+        - logs_manifest_result.problem_hosts | length > 0
+      no_log: true
+      ignore_errors: true
+      register: logs_mail
+
+    - name: Report a mail that could not be sent
+      ansible.builtin.debug:
+        msg: "The notification mail could not be sent. Check the logs_smtp_* settings and LOGS_SMTP_PASSWORD."
+      when: logs_mail is failed
+
+    - name: End the run as failed when a host had problems
+      ansible.builtin.fail:
+        msg: "Hosts with problems on {{ logs_w.day }}: {{ logs_manifest_result.problem_hosts.keys() | join(', ') }}"
+      when:
+        - logs_fail_on_host_failure | bool
+        - logs_manifest_result.problem_hosts | length > 0

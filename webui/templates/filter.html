@@ -1,0 +1,27 @@
+{{define "page"}}{{end}}
+
+{{define "filter_head"}}{{template "head" .}}
+{{with .Data}}
+<p class="crumbs"><a href="/days">Days</a> / <a href="/day/{{.Day}}">{{.Day}}</a> / {{.Host}} / <a href="{{.Base}}">{{.File}}</a></p>
+<div class="viewbar">
+  <form method="get" action="{{.Base}}">
+    <label>Filter <input type="search" name="q" value="{{.Query}}" required></label>
+    <button type="submit">Search file</button>
+  </form>
+  <nav class="seg"><a href="{{.Base}}">Back to the log</a></nav>
+</div>
+<p class="muted small">Lines containing “{{.Query}}”, from byte {{num .Off}}. The number in front of each line is its byte offset; click it to see the surrounding lines.</p>
+{{end}}
+<pre class="log">{{end}}
+
+{{define "filter_foot"}}</pre>
+{{with .Data}}
+<p>
+  {{.Matches}} matching line(s) in bytes {{num .From}} to {{num .To}} of {{num .Size}}.
+  {{if eq .Reason "limit"}}Stopped at the limit of {{.Limit}} results. <a href="{{.Continue}}">Continue from here</a>{{end}}
+  {{if eq .Reason "timeout"}}Stopped after {{.Timeout}}. <a href="{{.Continue}}">Continue from here</a>{{end}}
+  {{if eq .Reason "error"}}Stopped early: the file could not be read to the end.{{end}}
+  {{if eq .Reason "done"}}Reached the end of the file.{{end}}
+</p>
+{{end}}
+{{template "foot" .}}{{end}}

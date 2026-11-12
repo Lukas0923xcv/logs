@@ -1,0 +1,21 @@
+---
+# Example inventory. Copy to inventory.yml (git-ignored) and list your hosts.
+# install.sh puts a copy with no hosts in /etc/logs/inventory.yml.
+#
+# The hosts can be Ubuntu or Debian machines (VMs or containers). They need
+# python3 and a user that may use sudo without a password.
+all:
+  vars:
+    ansible_user: logcollector
+    ansible_become: true
+  hosts: {}
+    # web01.example.com:
+    #   ansible_host: 192.0.2.11
+    #   logs_extra_files:
+    #     - /var/log/nginx/access.log
+    #     - /var/log/nginx/error.log
+    # db01.example.com:
+    #   ansible_host: 192.0.2.12
+    # container01.example.com:
+    #   ansible_host: 192.0.2.13
+    #   logs_docker: "no"

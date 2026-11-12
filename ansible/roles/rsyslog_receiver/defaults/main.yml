@@ -1,0 +1,15 @@
+---
+# rsyslog receiver for devices that can only send syslog (firewalls, switches).
+# It writes one file per sender and day; the collector imports them.
+logs_syslog_spool: /var/spool/logs-syslog
+logs_syslog_udp_port: 514        # 0 turns the listener off
+logs_syslog_tcp_port: 514        # 0 turns the listener off
+logs_syslog_listen_address: ""   # empty = all addresses
+# Senders that may deliver, as rsyslog AllowedSender values. Empty = anyone
+# who can reach the port, so restrict it here or in your firewall.
+logs_syslog_allowed_senders: []  # e.g. ["192.0.2.1", "198.51.100.0/24"]
+# User or group that runs the collector and must be able to read the spool.
+logs_syslog_spool_group: logs-collector
+# Files in the spool are removed by systemd-tmpfiles after this time. Keep it
+# longer than the collector could be down.
+logs_syslog_spool_max_age: 14d

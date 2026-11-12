@@ -1,0 +1,31 @@
+{{define "page"}}{{template "head" .}}
+{{with .Data}}
+<div class="card-head">
+  <h1>Days</h1>
+  <nav class="seg" aria-label="Year">
+    {{range .Years}}<a href="?year={{.}}"{{if eq . $.Data.Year}} aria-current="true"{{end}}>{{.}}</a>{{end}}
+  </nav>
+</div>
+{{if .Days}}
+<div class="scroll"><table>
+  <thead><tr><th>Day</th><th>Stored as</th><th class="n">Size</th><th class="n">Archive</th><th class="n">Lines</th><th class="n">Errors</th><th class="n">Warnings</th><th class="n">Hosts ok</th><th>Problems</th></tr></thead>
+  <tbody>
+  {{range .Days}}<tr>
+    <td><a href="/day/{{.Day}}">{{.Day}}</a></td>
+    <td><span class="badge {{.State}}">{{.State}}</span>{{if not .HasManifest}} <span class="badge bad">no manifest</span>{{end}}</td>
+    <td class="n">{{if .HasManifest}}{{bytes .Bytes}}{{end}}</td>
+    <td class="n">{{if ge .ArchiveBytes 0}}{{bytes .ArchiveBytes}}{{end}}</td>
+    <td class="n">{{if .HasManifest}}{{num .Lines}}{{end}}</td>
+    <td class="n">{{if .HasManifest}}{{num .Errors}}{{end}}</td>
+    <td class="n">{{if .HasManifest}}{{num .Warnings}}{{end}}</td>
+    <td class="n">{{if .HasManifest}}{{.HostsOK}}{{end}}</td>
+    <td class="wrap">{{range $i, $h := .Problems}}{{if $i}}, {{end}}{{$h}}{{end}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}
+<p class="muted">Nothing is stored yet. Run the collector once, then reload.</p>
+{{end}}
+{{end}}
+{{template "foot" .}}{{end}}

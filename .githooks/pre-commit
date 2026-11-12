@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pre-commit: secret scan (gitleaks) and private-string check on staged changes.
+# Enable the hooks once per clone with: scripts/install-hooks.sh
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks is not installed. Install it (https://github.com/gitleaks/gitleaks) and commit again." >&2
+    exit 1
+fi
+gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
+scripts/check-denylist.sh --staged

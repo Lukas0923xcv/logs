@@ -1,0 +1,41 @@
+name: Installer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: install.sh on ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "ubuntu:26.04"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: webui/go.mod
+          cache-dependency-path: webui/go.sum
+      - name: Build release files
+        run: scripts/build-release.sh v0.0.0-ci
+      - name: Install, upgrade, uninstall and purge in a fresh container with systemd
+        run: tests/installer-test.sh "${{ matrix.image }}"
+
+  refuse:
+    name: install.sh refuses other systems
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Debian is refused with a clear message
+        run: |
+          if out=$(docker run --rm -v "$PWD:/src:ro" debian:12 bash /src/install.sh --non-interactive 2>&1); then
+            echo "install.sh should have refused Debian"; exit 1
+          fi
+          echo "$out"
+          echo "$out" | grep -q "must run Ubuntu Server 24.04 LTS or 26.04 LTS"

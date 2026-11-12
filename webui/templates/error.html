@@ -1,0 +1,5 @@
+{{define "page"}}{{template "head" .}}
+<h1>{{.Data.Status}} {{.Title}}</h1>
+<p>{{.Data.Message}}</p>
+<p><a href="/">Back to the overview</a></p>
+{{template "foot" .}}{{end}}

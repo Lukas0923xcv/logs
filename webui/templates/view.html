@@ -1,0 +1,23 @@
+{{define "page"}}{{template "head" .}}
+{{with .Data}}
+<p class="crumbs"><a href="/days">Days</a> / <a href="/day/{{.Day}}">{{.Day}}</a> / {{.Host}} / {{.File}}</p>
+{{template "viewbar" .}}
+<p class="muted small">Bytes {{num .Start}} to {{num .End}} of {{num .Size}}{{if .Truncated}} (the last line is longer than a page and is cut){{end}}</p>
+<pre class="log">{{.Text}}</pre>
+{{template "viewbar" .}}
+{{end}}
+{{template "foot" .}}{{end}}
+
+{{define "viewbar"}}
+<div class="viewbar">
+  <nav class="seg">
+    {{if .HasPrev}}<a href="{{.Base}}">First</a><a href="{{.Base}}?off={{.PrevOff}}">&larr; Previous</a>{{end}}
+    {{if .HasNext}}<a href="{{.Base}}?off={{.NextOff}}">Next &rarr;</a><a href="{{.Base}}?tail=1">Tail</a>{{end}}
+    <a href="/raw/{{.Day}}/{{.Host}}/{{.File}}">Download</a>
+  </nav>
+  <form method="get" action="{{.Base}}">
+    <label>Filter <input type="search" name="q" placeholder="text, case-insensitive" required></label>
+    <button type="submit">Search file</button>
+  </form>
+</div>
+{{end}}

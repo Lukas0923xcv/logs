@@ -1,0 +1,19 @@
+# Site-specific files: never commit these.
+private-denylist.txt
+/private/
+ansible/inventory.yml
+ansible/inventory.ini
+ansible/group_vars/*.yml
+!ansible/group_vars/*.example.yml
+ansible/host_vars/
+*.env
+!config.example.env
+*.cred
+htpasswd
+
+# Build and test output
+/dist/
+__pycache__/
+*.pyc
+*.retry
+/webui/logs-webui

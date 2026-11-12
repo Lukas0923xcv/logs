@@ -1,0 +1,5 @@
+# gitleaks configuration: the default rules, nothing switched off.
+title = "logs"
+
+[extend]
+useDefault = true

@@ -1,0 +1,109 @@
+{{define "page"}}{{template "head" .}}
+{{with .Data}}
+{{if .IndexErr}}<p class="alert"><strong>Problem:</strong> {{.IndexErr}}. Check that the share is mounted.</p>{{end}}
+
+<section class="tiles" aria-label="Totals">
+{{range .Tiles}}
+  <div class="tile"><div class="label">{{.Label}}</div><div class="value">{{.Value}}</div><div class="note">{{.Note}}</div></div>
+{{end}}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Collected size per day</h2>
+    <nav class="seg" aria-label="Chart range">
+      <a href="?range=30&amp;period={{.Period}}"{{if eq .Range "30"}} aria-current="true"{{end}}>30 d</a>
+      <a href="?range=90&amp;period={{.Period}}"{{if or (eq .Range "90") (eq .Range "")}} aria-current="true"{{end}}>90 d</a>
+      <a href="?range=365&amp;period={{.Period}}"{{if eq .Range "365"}} aria-current="true"{{end}}>1 y</a>
+      <a href="?range=all&amp;period={{.Period}}"{{if eq .Range "all"}} aria-current="true"{{end}}>All</a>
+    </nav>
+  </div>
+  {{with .Chart}}
+  {{if .Empty}}
+  <p class="muted">No manifests yet. The chart fills in after the first collector run.</p>
+  {{else}}
+  <p class="muted">{{.From}} to {{.To}}: {{bytes .Total}} over {{.CollectedDays}} day(s), {{bytes .AverageBytes}} per day on average{{if .LargestDay}}, largest {{bytes .LargestDaySize}} on <a href="/day/{{.LargestDay}}">{{.LargestDay}}</a>{{end}}.</p>
+  <svg class="chart" viewBox="0 0 {{.W}} {{.H}}" role="img" aria-label="Bar chart of uncompressed log bytes collected per day from {{.From}} to {{.To}}">
+    {{range .Ticks}}
+    <line class="grid" x1="{{$.Data.Chart.PlotX}}" x2="{{$.Data.Chart.W}}" y1="{{.Y}}" y2="{{.Y}}"/>
+    <text class="axis" x="{{$.Data.Chart.PlotX}}" y="{{.Y}}" dx="-8" dy="4" text-anchor="end">{{.Label}}</text>
+    {{end}}
+    {{range .Bars}}
+    <a href="/day/{{.Day}}">
+      <title>{{.Title}}</title>
+      <rect class="hit" x="{{.HitX}}" y="{{$.Data.Chart.PlotY}}" width="{{.HitW}}" height="{{$.Data.Chart.PlotH}}"/>
+      {{if .HasValue}}<path class="bar" d="{{.Path}}"/>{{end}}
+      {{if and .Problem $.Data.Chart.ShowMarks}}<circle class="problem" cx="{{.MarkX}}" cy="{{$.Data.Chart.BaseY}}" r="3" transform="translate(0 7)"/>{{end}}
+    </a>
+    {{end}}
+    {{range .XLabels}}<text class="axis" x="{{.X}}" y="{{$.Data.Chart.H}}" dy="-4" text-anchor="{{.Anchor}}">{{.Text}}</text>{{end}}
+  </svg>
+  <p class="muted small">Hover a bar for its numbers, click it to open the day.{{if .AnyProblem}} <span class="dot problem-dot"></span> marks days where a host had problems (listed below).{{end}} The same data as a table: <a href="/days">Browse</a>.</p>
+  {{end}}
+  {{end}}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Ranking by size</h2>
+    <nav class="seg" aria-label="Ranking period">
+      <a href="?period=latest&amp;range={{.Range}}"{{if eq .Period "latest"}} aria-current="true"{{end}}>Latest day</a>
+      <a href="?period=7d&amp;range={{.Range}}"{{if eq .Period "7d"}} aria-current="true"{{end}}>7 d</a>
+      <a href="?period=30d&amp;range={{.Range}}"{{if eq .Period "30d"}} aria-current="true"{{end}}>30 d</a>
+      <a href="?period=all&amp;range={{.Range}}"{{if eq .Period "all"}} aria-current="true"{{end}}>All</a>
+    </nav>
+  </div>
+  <div class="cols">
+    <div>
+      <h3>Hosts</h3>
+      {{template "ranktable" .Hosts}}
+    </div>
+    <div>
+      <h3>Services (host / source)</h3>
+      {{template "ranktable" .Services}}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Growth per service</h2>
+  <p class="muted">Last 7 collected days compared with the 7 days before, largest change first.</p>
+  {{if .Growth}}
+  <div class="scroll"><table>
+    <thead><tr><th>Service</th><th class="n">Last 7 d</th><th class="n">Previous 7 d</th><th class="n">Change</th><th class="n">%</th></tr></thead>
+    <tbody>
+    {{range .Growth}}<tr><td>{{.Name}}</td><td class="n">{{bytes .Cur}}</td><td class="n">{{bytes .Prev}}</td><td class="n">{{signedBytes .Delta}}</td><td class="n">{{if .HasPrev}}{{signedPct .Pct}}{{else}}new{{end}}</td></tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{else}}<p class="muted">No data yet.</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>Hosts with problems</h2>
+  {{if .Failures}}
+  <div class="scroll"><table>
+    <thead><tr><th>Day</th><th>Host</th><th>Status</th><th>Reason</th></tr></thead>
+    <tbody>
+    {{range .Failures}}{{$day := .Day}}{{range .Hosts}}<tr><td><a href="/day/{{$day}}">{{$day}}</a></td><td>{{.Name}}</td><td><span class="badge bad">{{.Status}}</span></td><td class="wrap">{{.Error}}</td></tr>
+    {{end}}{{end}}
+    </tbody>
+  </table></div>
+  {{else}}<p class="muted">No host has failed on any stored day.</p>{{end}}
+</section>
+
+<p class="muted small">Statistics come from the daily manifests; log files are not scanned. Index built {{.Built}}.</p>
+{{end}}
+{{template "foot" .}}{{end}}
+
+{{define "ranktable"}}
+{{if .}}
+<div class="scroll"><table>
+  <thead><tr><th>Name</th><th class="n">Size</th><th class="n">Share</th><th class="n">Lines</th><th class="n">Errors</th><th class="n">Warnings</th></tr></thead>
+  <tbody>
+  {{range .}}<tr><td>{{.Name}}</td><td class="n">{{bytes .Bytes}}</td><td class="n">{{pct .Share}}</td><td class="n">{{num .Lines}}</td><td class="n">{{num .Errors}}</td><td class="n">{{num .Warnings}}</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}<p class="muted">No data for this period.</p>{{end}}
+{{end}}

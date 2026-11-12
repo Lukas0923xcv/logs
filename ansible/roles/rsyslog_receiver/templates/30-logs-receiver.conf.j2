@@ -1,0 +1,32 @@
+# Managed by the rsyslog_receiver role of the log archive. Do not edit.
+#
+# Remote messages go to {{ logs_syslog_spool }}/<sender IP>/<YYYY-MM-DD>.log.
+# The day comes from the time of reception on this host, so each message
+# lands in exactly one day. The collector imports the finished days.
+
+module(load="imudp")
+module(load="imtcp")
+
+{% for sender in logs_syslog_allowed_senders %}
+$AllowedSender UDP, {{ sender }}
+$AllowedSender TCP, {{ sender }}
+{% endfor %}
+
+template(name="LogsArchiveFile" type="string"
+         string="{{ logs_syslog_spool }}/%fromhost-ip%/%$year%-%$month%-%$day%.log")
+template(name="LogsArchiveLine" type="string"
+         string="%timegenerated:::date-rfc3339% %hostname% %syslogtag%%msg:::sp-if-no-1st-sp%%msg:::drop-last-lf%\n")
+
+ruleset(name="logs_archive_remote") {
+    action(type="omfile" dynaFile="LogsArchiveFile" template="LogsArchiveLine"
+           fileOwner="syslog" fileGroup="{{ logs_syslog_spool_group }}" fileCreateMode="0640"
+           dirOwner="syslog" dirGroup="{{ logs_syslog_spool_group }}" dirCreateMode="0770")
+    stop
+}
+
+{% if logs_syslog_udp_port | int > 0 %}
+input(type="imudp" port="{{ logs_syslog_udp_port }}"{% if logs_syslog_listen_address %} address="{{ logs_syslog_listen_address }}"{% endif %} ruleset="logs_archive_remote")
+{% endif %}
+{% if logs_syslog_tcp_port | int > 0 %}
+input(type="imtcp" port="{{ logs_syslog_tcp_port }}"{% if logs_syslog_listen_address %} address="{{ logs_syslog_listen_address }}"{% endif %} ruleset="logs_archive_remote")
+{% endif %}

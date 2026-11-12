@@ -1,0 +1,55 @@
+{{define "page"}}{{template "head" .}}
+{{with .Data}}
+<p class="crumbs"><a href="/days?year={{slice .Day.Day 0 4}}">Days</a> / {{.Day.Day}}</p>
+<div class="card-head">
+  <h1>{{.Day.Day}} <span class="badge {{.Day.State}}">{{.Day.State}}</span></h1>
+  <nav class="seg">
+    {{if .Prev}}<a href="/day/{{.Prev}}">&larr; {{.Prev}}</a>{{end}}
+    {{if .Next}}<a href="/day/{{.Next}}">{{.Next}} &rarr;</a>{{end}}
+  </nav>
+</div>
+<p class="muted">
+  {{if .Day.HasManifest}}{{bytes .Day.Bytes}} in {{num .Day.Lines}} lines.{{else}}No manifest for this day, so there are no statistics.{{end}}
+  {{if eq .Day.State "raw"}}Raw logs can be viewed, filtered and downloaded.{{end}}
+  {{if eq .Day.State "archived"}}This day is archived: files are decompressed on the fly when you download them.{{end}}
+  {{if eq .Day.State "expired"}}Raw logs and archive are gone; only the statistics remain.{{end}}
+  {{if ge .Day.ArchiveBytes 0}}<a href="/archive/{{.Day.Day}}.tar.zst">Download the whole archive ({{bytes .Day.ArchiveBytes}})</a>{{end}}
+</p>
+
+{{range .Hosts}}{{$host := .Name}}
+<section class="card">
+  <h2>{{.Name}}
+    {{if eq .Status "ok"}}<span class="badge ok">ok</span>{{else}}<span class="badge bad">{{.Status}}</span>{{end}}
+    {{if .Origin}}<span class="badge">{{.Origin}}</span>{{end}}
+  </h2>
+  {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+  {{if .Files}}
+  <div class="scroll"><table>
+    <thead><tr><th>Source</th><th class="n">Size</th><th class="n">Lines</th><th class="n">Errors</th><th class="n">Warnings</th><th>Actions</th></tr></thead>
+    <tbody>
+    {{range .Files}}<tr>
+      <td>{{.Source}}{{if .Failed}} <span class="badge bad">failed</span> <span class="muted">{{.Msg}}</span>{{end}}</td>
+      <td class="n">{{bytes .Bytes}}</td>
+      <td class="n">{{if .HasStats}}{{num .Lines}}{{end}}</td>
+      <td class="n">{{if .HasStats}}{{num .Errors}}{{end}}</td>
+      <td class="n">{{if .HasStats}}{{num .Warnings}}{{end}}</td>
+      <td class="actions">
+        {{if and $.Data.Day.HasRaw .Name}}
+          <a href="/view/{{$.Data.Day.Day}}/{{$host}}/{{.Name}}">View</a>
+          <a href="/view/{{$.Data.Day.Day}}/{{$host}}/{{.Name}}?tail=1">Tail</a>
+          <a href="/raw/{{$.Data.Day.Day}}/{{$host}}/{{.Name}}">Download</a>
+        {{else if and (ge $.Data.Day.ArchiveBytes 0) .Name}}
+          <a href="/extract/{{$.Data.Day.Day}}/{{$host}}/{{.Name}}">Download from archive</a>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{else}}<p class="muted">No files.</p>{{end}}
+</section>
+{{else}}
+<p class="muted">No hosts are recorded for this day.</p>
+{{end}}
+{{end}}
+{{template "foot" .}}{{end}}

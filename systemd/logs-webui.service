@@ -1,0 +1,50 @@
+[Unit]
+Description=Log archive web UI (read-only)
+Documentation=https://github.com/Lukas0923xcv/logs
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+User=logs-web
+Group=logs-web
+EnvironmentFile=/etc/logs/webui.env
+# Soft limit for the Go runtime, kept below the hard cgroup limit.
+Environment=GOMEMLIMIT=48MiB
+ExecStart=/usr/local/bin/logs-webui
+Restart=on-failure
+RestartSec=5
+
+# Resource limits
+MemoryMax=64M
+MemorySwapMax=0
+CPUQuota=50%
+TasksMax=64
+
+# Hardening: no privileges, read-only view of the system
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

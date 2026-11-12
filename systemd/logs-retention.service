@@ -1,0 +1,17 @@
+[Unit]
+Description=Log archive: compress old days and expire old archives
+Documentation=https://github.com/Lukas0923xcv/logs
+After=network-online.target remote-fs.target logs-collect.service
+
+[Service]
+Type=oneshot
+User=logs-collector
+Group=logs-collector
+WorkingDirectory=/usr/local/share/logs/ansible
+Environment=HOME=/var/lib/logs-collector ANSIBLE_NOCOLOR=1
+ExecStart=/usr/bin/ansible-playbook -i /etc/logs/inventory.yml retention.yml
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes

@@ -1,0 +1,49 @@
+---
+- name: Install rsyslog
+  ansible.builtin.apt:
+    name: rsyslog
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Make sure the group that reads the spool exists
+  ansible.builtin.group:
+    name: "{{ logs_syslog_spool_group }}"
+    system: true
+
+- name: Create the spool directory
+  ansible.builtin.file:
+    path: "{{ logs_syslog_spool }}"
+    state: directory
+    owner: syslog
+    group: "{{ logs_syslog_spool_group }}"
+    mode: "2770"
+
+- name: Configure the receiver
+  ansible.builtin.template:
+    src: 30-logs-receiver.conf.j2
+    dest: /etc/rsyslog.d/30-logs-receiver.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rsyslog
+
+- name: Check the complete rsyslog configuration
+  ansible.builtin.command: rsyslogd -N1
+  changed_when: false
+
+- name: Remove spool files that are older than the keep time
+  ansible.builtin.copy:
+    content: |
+      # Managed by the rsyslog_receiver role of the log archive.
+      e {{ logs_syslog_spool }} - - - {{ logs_syslog_spool_max_age }}
+    dest: /etc/tmpfiles.d/logs-syslog.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable rsyslog
+  ansible.builtin.service:
+    name: rsyslog
+    state: started
+    enabled: true

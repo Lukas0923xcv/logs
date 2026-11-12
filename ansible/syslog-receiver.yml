@@ -1,0 +1,16 @@
+---
+# Optional: turn the collector host into a syslog receiver for devices that
+# cannot be reached with Ansible. Run it once, on the collector:
+#
+#   sudo ansible-playbook syslog-receiver.yml \
+#     -e '{"logs_syslog_allowed_senders": ["192.0.2.1"]}'
+#
+# Then set logs_syslog_spool (and logs_syslog_names) for the collector.
+
+- name: Set up the rsyslog receiver
+  hosts: "{{ logs_syslog_receiver_host | default('localhost') }}"
+  connection: "{{ 'local' if (logs_syslog_receiver_host | default('localhost')) == 'localhost' else omit }}"
+  become: true
+  gather_facts: false
+  roles:
+    - rsyslog_receiver

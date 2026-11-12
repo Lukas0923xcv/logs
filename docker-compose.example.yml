@@ -1,0 +1,16 @@
+# Optional: run the web UI as a container instead of a systemd service.
+# Copy to docker-compose.yml and adjust the path of the read-only mount.
+services:
+  logs-webui:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    cpus: 0.5
+    ports:
+      - "127.0.0.1:8484:8484"
+    volumes:
+      - /mnt/logs-ro:/data:ro
