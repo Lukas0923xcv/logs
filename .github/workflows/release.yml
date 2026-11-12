@@ -1,31 +1,59 @@
 name: Release
 
+# Runs when a tag v* is pushed, and when a release is published in the GitHub
+# web UI. Either way the build files end up attached to the release.
+
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
 
 permissions:
   contents: write
+
+# Creating a release in the web UI also creates its tag, which fires both
+# triggers. They must not run at the same time for the same tag: the second
+# run waits for the first and then finds the release in place.
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
 jobs:
   release:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || github.ref_name }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: webui/go.mod
           cache-dependency-path: webui/go.sum
       - name: The changelog must describe this version
-        run: grep -q "^## \[${GITHUB_REF_NAME#v}\]" CHANGELOG.md
+        run: grep -q "^## \[${TAG#v}\]" CHANGELOG.md
       - name: Test
         working-directory: webui
         run: go test ./...
       - name: Build binaries (amd64, arm64), bundle and SHA256SUMS
-        run: scripts/build-release.sh "$GITHUB_REF_NAME"
+        run: scripts/build-release.sh "$TAG"
       - name: Release notes from the changelog
-        run: awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
+        run: awk -v v="${TAG#v}" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+        run: |
+          set -u
+          if out=$(gh release view "$TAG" 2>&1); then
+            echo "Release $TAG exists: attaching the files to it."
+            gh release upload "$TAG" dist/* --clobber
+          elif grep -qi "not found" <<< "$out"; then
+            echo "No release for $TAG yet: creating it."
+            gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md --verify-tag
+          else
+            echo "Could not look up the release: $out" >&2
+            exit 1
+          fi
