@@ -24,7 +24,7 @@ COLLECT_HOME=/var/lib/logs-collector
 FSTAB_TAG="# logs-archive"
 UNITS="logs-webui.service logs-collect.service logs-collect.timer logs-retention.service logs-retention.timer"
 
-VERSION=""
+WANT_VERSION=""  # not VERSION: /etc/os-release defines that name too
 WEBUI=1
 TIMERS=1
 MOUNT=1
@@ -73,8 +73,8 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --version) [ $# -ge 2 ] || die "--version needs a value, e.g. --version v1.0.0"; VERSION=$2; shift ;;
-        --version=*) VERSION=${1#*=} ;;
+        --version) [ $# -ge 2 ] || die "--version needs a value, e.g. --version v1.0.0"; WANT_VERSION=$2; shift ;;
+        --version=*) WANT_VERSION=${1#*=} ;;
         --no-webui) WEBUI=0 ;;
         --no-timers) TIMERS=0 ;;
         --no-mount) MOUNT=0 ;;
@@ -87,9 +87,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ "$PURGE" -eq 0 ] || [ "$UNINSTALL" -eq 1 ] || die "--purge only works together with --uninstall"
-case "$VERSION" in
+case "$WANT_VERSION" in
     "" | v[0-9]*) ;;
-    *) die "--version must look like v1.2.3, got: $VERSION" ;;
+    *) die "--version must look like v1.2.3, got: $WANT_VERSION" ;;
 esac
 
 # ---------------------------------------------------------------- checks ----
@@ -97,10 +97,16 @@ esac
 [ "$(id -u)" -eq 0 ] || die "this installer must run as root. Run it with sudo."
 
 [ -r /etc/os-release ] || die "cannot read /etc/os-release; only Ubuntu Server 24.04 LTS and 26.04 LTS are supported."
+# Read os-release in a subshell: it defines VERSION, ID and more, and must not
+# leak into this script's variables.
 # shellcheck disable=SC1091
-. /etc/os-release
-if [ "${ID:-}" != ubuntu ] || { [ "${VERSION_ID:-}" != 24.04 ] && [ "${VERSION_ID:-}" != 26.04 ]; }; then
-    die "unsupported system: ${PRETTY_NAME:-unknown}. The collector and web UI host must run Ubuntu Server 24.04 LTS or 26.04 LTS. (The hosts you collect logs from may run Ubuntu or Debian.)"
+os_id=$(. /etc/os-release && printf '%s' "${ID:-}")
+# shellcheck disable=SC1091
+os_version=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
+# shellcheck disable=SC1091
+os_name=$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-unknown}")
+if [ "$os_id" != ubuntu ] || { [ "$os_version" != 24.04 ] && [ "$os_version" != 26.04 ]; }; then
+    die "unsupported system: $os_name. The collector and web UI host must run Ubuntu Server 24.04 LTS or 26.04 LTS. (The hosts you collect logs from may run Ubuntu or Debian.)"
 fi
 
 case "$(dpkg --print-architecture)" in
@@ -222,15 +228,20 @@ say "installed: $PACKAGES"
 step "Getting the release files"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+# LOGS_RELEASE_BASE only exists for the installer test (plain http, local server).
+RELEASE_BASE=${LOGS_RELEASE_BASE:-https://github.com/$REPO/releases}
+CURL_PROTO='=https'
+[ -z "${LOGS_RELEASE_BASE:-}" ] || CURL_PROTO='=http,https'
 if [ -n "${LOGS_DIST_DIR:-}" ]; then
     SOURCE="local directory $LOGS_DIST_DIR"
     fetch() { cp "$LOGS_DIST_DIR/$1" "$WORK/$1"; }
-elif [ -n "$VERSION" ]; then
-    SOURCE="https://github.com/$REPO/releases/download/$VERSION"
-    fetch() { curl -fsSL --retry 3 --proto '=https' --tlsv1.2 -o "$WORK/$1" "$SOURCE/$1"; }
 else
-    SOURCE="https://github.com/$REPO/releases/latest/download"
-    fetch() { curl -fsSL --retry 3 --proto '=https' --tlsv1.2 -o "$WORK/$1" "$SOURCE/$1"; }
+    if [ -n "$WANT_VERSION" ]; then
+        SOURCE="$RELEASE_BASE/download/$WANT_VERSION"
+    else
+        SOURCE="$RELEASE_BASE/latest/download"
+    fi
+    fetch() { curl -fsSL --retry 3 --proto "$CURL_PROTO" --tlsv1.2 -o "$WORK/$1" "$SOURCE/$1"; }
 fi
 FILES="logs-bundle.tar.gz"
 [ "$WEBUI" -eq 1 ] && FILES="$FILES logs-webui-linux-$ARCH"

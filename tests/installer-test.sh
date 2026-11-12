@@ -72,6 +72,24 @@ inc curl -fs http://127.0.0.1:8484/ | grep -q "read-only" || fail "dashboard not
 inc sh -c 'getent passwd logs-web | grep -q nologin' || fail "logs-web can log in"
 ok "fresh install: service active, health ok, limits applied"
 
+# --- 1b. the real download path (URL building, SHA256SUMS) against a local server
+# This path once broke because /etc/os-release overwrote the version variable.
+inc sh -c 'rm -rf /srv/rel && mkdir -p /srv/rel/download/v0.0.0-test /srv/rel/latest && cp /src/dist/* /srv/rel/download/v0.0.0-test/ && cp -r /srv/rel/download/v0.0.0-test /srv/rel/latest/download'
+docker exec -d "$name" python3 -m http.server 8099 --directory /srv/rel >/dev/null 2>&1 || true
+inc sh -c 'command -v python3 >/dev/null || { apt-get install -y -qq python3 >/dev/null 2>&1; }'
+docker exec -d "$name" python3 -m http.server 8099 --directory /srv/rel >/dev/null 2>&1 || true
+for _ in $(seq 20); do inc curl -fs http://127.0.0.1:8099/latest/download/SHA256SUMS >/dev/null 2>&1 && break; sleep 0.5; done
+inc env LOGS_RELEASE_BASE=http://127.0.0.1:8099 bash /src/install.sh --non-interactive --no-mount --version v0.0.0-test > /tmp/install1b.log 2>&1 \
+    || { tail -20 /tmp/install1b.log; fail "install with --version over the download path failed"; }
+grep -q "download/v0.0.0-test" /tmp/install1b.log || grep -q "verified against SHA256SUMS" /tmp/install1b.log || fail "download path not used"
+inc env LOGS_RELEASE_BASE=http://127.0.0.1:8099 bash /src/install.sh --non-interactive --no-mount > /tmp/install1c.log 2>&1 \
+    || { tail -20 /tmp/install1c.log; fail "install of the latest release over the download path failed"; }
+inc sh -c 'cd /srv/rel/latest/download && echo tampered >> logs-bundle.tar.gz'
+! inc env LOGS_RELEASE_BASE=http://127.0.0.1:8099 bash /src/install.sh --non-interactive --no-mount > /tmp/install1d.log 2>&1 || fail "a tampered download was accepted"
+grep -q "checksum of logs-bundle.tar.gz does not match" /tmp/install1d.log || fail "tampering not reported"
+inc sh -c 'cp /src/dist/logs-bundle.tar.gz /srv/rel/latest/download/'
+ok "download path: --version and latest work, tampered file is refused"
+
 # --- 2. second run upgrades in place and keeps the configuration -------------
 inc sh -c 'echo "LOGS_TITLE=kept-by-upgrade" >> /etc/logs/webui.env; echo "# my hosts" >> /etc/logs/inventory.yml'
 before=$(inc sha256sum /etc/logs/webui.env /etc/logs/inventory.yml /etc/logs/group_vars/all.yml)
