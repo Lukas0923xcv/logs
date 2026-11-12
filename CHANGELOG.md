@@ -5,6 +5,55 @@ All notable changes are listed here. Versions follow
 variables are listed under "Configuration" for each version, so you can
 compare your files in `/etc/logs/` after an upgrade.
 
+## [0.1.1] - 2026-11-12
+
+### Changed
+
+- **SMB mounts are configured in one file, `/etc/logs/install.conf`.** The
+  first install creates it from the new `install.example.conf` (mode 0600,
+  owner root) and never overwrites it. Running the installer again, or
+  `sudo logs-install --apply`, writes `/etc/logs/smb-rw.cred` and
+  `smb-ro.cred`, replaces the `# logs-archive` lines in `/etc/fstab` and
+  remounts. The file is parsed, never sourced: only the known keys are
+  accepted, optional surrounding quotes are removed, and unknown keys,
+  duplicates and malformed lines stop the run with a message that names the
+  line (and never shows a value). A bad file is detected before anything is
+  changed. Passwords may contain any character except a line break.
+- `install.sh` is installed as `/usr/local/sbin/logs-install`. New option
+  `--apply` applies `install.conf` only (no download, no reinstall) and exits
+  with 1 if a mount failed.
+- `--no-mount` now means "do not touch `install.conf` and the mounts".
+  `--non-interactive` still works but does nothing: the installer never asks.
+- The release bundle now contains `install.sh` and `install.example.conf`.
+- `/etc/fstab` is only backed up when the lines really change.
+
+### Removed
+
+- The interactive mount questions and the `LOGS_SMB_*`, `LOGS_RW_OWNER`,
+  `LOGS_RW_MOUNT` and `LOGS_RO_MOUNT` environment variables of the installer.
+  Put the values in `/etc/logs/install.conf` instead.
+
+### Fixed
+
+- `install.sh` failed on real systems with `--version vX.Y.Z` and without it:
+  `/etc/os-release` overwrote the script's `VERSION` variable, so the download
+  URL was built from the distribution version. The installer test now also
+  covers the real download path and a tampered download.
+- The question "Set up the SMB mounts?" always read an empty answer (a `local`
+  variable shadowed the caller's variable). The questions are gone.
+
+### Configuration
+
+New file `/etc/logs/install.conf` with the keys `LOGS_SMB_SHARE`,
+`LOGS_SMB_DOMAIN`, `LOGS_SMB_RW_USER`, `LOGS_SMB_RW_PASSWORD`,
+`LOGS_SMB_RO_USER`, `LOGS_SMB_RO_PASSWORD`, `LOGS_RW_OWNER` (default
+`logs-collector`), `LOGS_RW_MOUNT` (default `/mnt/logs-rw`) and
+`LOGS_RO_MOUNT` (default `/mnt/logs-ro`). No collector or web UI variables
+changed.
+
+Upgrading from 0.1.0: a first run creates `install.conf`; copy your share,
+users and passwords into it and run `sudo logs-install --apply`.
+
 ## [0.1.0] - 2026-11-12
 
 First release.
@@ -52,4 +101,5 @@ Syslog receiver role: `logs_syslog_spool`, `logs_syslog_udp_port`,
 `logs_syslog_allowed_senders`, `logs_syslog_spool_group`,
 `logs_syslog_spool_max_age`.
 
+[0.1.1]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.1.0

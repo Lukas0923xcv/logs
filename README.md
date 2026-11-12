@@ -111,11 +111,19 @@ What the installer does:
 4. Creates two system users without login: `logs-web` (web UI) and
    `logs-collector` (collector, with its own SSH key).
 5. Creates the configuration in `/etc/logs/` from the example files. Existing
-   files are never overwritten.
-6. Installs the systemd units: `logs-webui.service`, `logs-collect.timer`
+   files are never overwritten. This includes `/etc/logs/install.conf`, which
+   holds the SMB mount settings.
+6. Installs itself as `/usr/local/sbin/logs-install`, so the mount settings
+   can be applied later without downloading anything.
+7. Installs the systemd units: `logs-webui.service`, `logs-collect.timer`
    (02:30) and `logs-retention.timer` (04:30).
-7. Optionally sets up the SMB mounts (see below).
-8. Prints a summary with the service status, the URL and the next steps.
+8. Applies `install.conf`: SMB credentials files, `/etc/fstab` lines and the
+   mounts (see [SMB mounts](#smb-mounts)). Nothing is mounted while
+   `LOGS_SMB_SHARE` is empty, which is the case after the first install.
+9. Prints a summary with the service status, the URL and the next steps.
+
+The installer never asks questions. Everything it needs for the mounts comes
+from one file.
 
 Options:
 
@@ -124,8 +132,9 @@ Options:
 | `--version vX.Y.Z` | Install this release instead of the latest. |
 | `--no-webui` | Do not install the web UI. |
 | `--no-timers` | Do not install the collector and retention timers. Use it when the collector runs from Semaphore. |
-| `--no-mount` | Do not offer to set up the SMB mounts. |
-| `--non-interactive` | Never ask. Values come from environment variables (see `--help`). |
+| `--no-mount` | Do not touch `install.conf` and the mounts. |
+| `--apply` | Only apply `/etc/logs/install.conf` (credentials files, `/etc/fstab`, mounts). Downloads and installs nothing. Exits with 1 if a mount failed. |
+| `--non-interactive` | Accepted for compatibility. The installer never asks anything. |
 | `--uninstall` | Remove binary and units. Keeps configuration and logs. |
 | `--uninstall --purge` | Also remove configuration, credentials, fstab entries and the users. Never the logs. |
 
@@ -137,24 +146,73 @@ curl -fsSL https://raw.githubusercontent.com/Lukas0923xcv/logs/main/install.sh |
 
 ### SMB mounts
 
-The installer asks whether it should set up the mounts. If you say yes it asks
-for the share (`//server/share`), the two SMB users and their passwords. The
-passwords are read with a hidden prompt, are never passed as arguments and
-never appear in the output. They end up only in `/etc/logs/smb-rw.cred` and
-`/etc/logs/smb-ro.cred` (mode 600, owner root).
+All mount settings live in one file, `/etc/logs/install.conf`. The first
+install creates it from [`install.example.conf`](install.example.conf) (mode
+0600, owner root, because it holds the SMB passwords) and never overwrites
+it. Each key is explained in the file.
 
-It adds two lines to `/etc/fstab`:
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `LOGS_SMB_SHARE` | empty | The share, for example `//nas.example.com/logs`. Empty means: set up no mounts. |
+| `LOGS_SMB_DOMAIN` | empty | Optional SMB domain or workgroup. |
+| `LOGS_SMB_RW_USER` | empty | SMB user with write access (collector). |
+| `LOGS_SMB_RW_PASSWORD` | empty | Its password. |
+| `LOGS_SMB_RO_USER` | empty | SMB user with read-only access (web UI). |
+| `LOGS_SMB_RO_PASSWORD` | empty | Its password. |
+| `LOGS_RW_OWNER` | `logs-collector` | Local user that owns the read-write mount. If Semaphore (or anything else) runs the playbooks, use its user, for example `semaphore`. |
+| `LOGS_RW_MOUNT` | `/mnt/logs-rw` | Mount point of the read-write mount. |
+| `LOGS_RO_MOUNT` | `/mnt/logs-ro` | Mount point of the read-only mount. |
+
+Edit the file, then apply it:
+
+```bash
+sudo nano /etc/logs/install.conf
+```
+
+```bash
+sudo logs-install --apply
+```
+
+`--apply` rewrites `/etc/logs/smb-rw.cred` and `/etc/logs/smb-ro.cred` (mode
+0600, owner root), replaces the `# logs-archive` lines in `/etc/fstab` and
+mounts both shares again. It needs no network access. Running the installer
+again (`sudo logs-install`, or the one-liner) applies the file as well. Both
+print the share, the users, the owner and whether each mount worked, and never
+a password.
+
+The resulting `/etc/fstab` lines look like this:
 
 ```
 //nas.example.com/logs /mnt/logs-rw cifs credentials=/etc/logs/smb-rw.cred,uid=logs-collector,gid=logs-collector,file_mode=0640,dir_mode=0750,_netdev,nofail 0 0 # logs-archive
 //nas.example.com/logs /mnt/logs-ro cifs ro,credentials=/etc/logs/smb-ro.cred,uid=logs-web,gid=logs-web,file_mode=0440,dir_mode=0550,_netdev,nofail 0 0 # logs-archive
 ```
 
-The collector writes through `/mnt/logs-rw`. The web UI only ever sees
-`/mnt/logs-ro`, mounted read-only with a user that has no write permission on
-the server. If something other than `logs-collector` runs the playbooks (for
-example Semaphore), give that user as owner of the read-write mount
-(`LOGS_RW_OWNER`, or answer the installer's question).
+The collector writes through the read-write mount. The web UI only ever sees
+the read-only mount, which uses an SMB user without write permission on the
+server.
+
+**File format.** `KEY=value`, one per line, no spaces around the `=`. The file
+is read, never executed:
+
+- A `#` starts a comment only at the start of a line, never after a value.
+- `$`, backticks, backslashes, `#` and quotes inside a value are taken
+  literally. A password may contain any character except a line break.
+- Unquoted values lose leading and trailing spaces. A value wrapped in one
+  pair of `"..."` or `'...'` loses those quotes and is otherwise kept
+  exactly. To keep spaces at the ends, or a password that starts and ends with
+  a quote character, add one more pair of quotes.
+- Unknown keys, duplicate keys, lines that are not `KEY=value` and Windows
+  line endings stop the installer with a message that names the line (never
+  the value). The check runs before anything is changed.
+
+Things that only skip one mount, with the reason shown in the summary: a
+missing user or password, or a `LOGS_RW_OWNER` that does not exist. If
+`LOGS_SMB_SHARE` is empty nothing is touched.
+
+The summary of a first install ends with the next step:
+`Edit /etc/logs/install.conf, then run: sudo logs-install`. If you installed
+with options such as `--no-timers`, repeat them (`sudo logs-install
+--no-timers`), or use `sudo logs-install --apply` which needs none.
 
 ### Manual installation
 
@@ -171,16 +229,27 @@ If you do not want to run the installer:
 5. Copy `config.example.env` to `/etc/logs/webui.env`,
    `ansible/inventory.example.yml` to `/etc/logs/inventory.yml` and
    `ansible/group_vars/all.example.yml` to `/etc/logs/group_vars/all.yml`.
-6. Mount the share twice as shown above.
+6. Mount the share twice, with lines like the ones shown under
+   [SMB mounts](#smb-mounts) (or copy `install.example.conf` to
+   `/etc/logs/install.conf`, fill it in and run `sudo bash install.sh --apply`
+   from the unpacked bundle).
 7. Copy `systemd/*` to `/etc/systemd/system/`, then
    `systemctl daemon-reload && systemctl enable --now logs-webui.service logs-collect.timer logs-retention.timer`.
 
 ## Upgrade
 
-Run the installer again. It replaces the binary, the playbooks and the units
-and keeps everything in `/etc/logs/`. New configuration variables are listed
-in the [CHANGELOG](CHANGELOG.md); compare your files with the new examples in
-`/usr/local/share/logs/`.
+Run the installer again (the one-liner, or `sudo logs-install` with the same
+options you used the first time, for example `--no-timers`). It replaces the
+binary, the playbooks, the units and `/usr/local/sbin/logs-install` and keeps
+everything in `/etc/logs/`, including `install.conf`, which is applied again.
+A bad `install.conf` stops the upgrade before anything is changed. New
+configuration variables are listed in the [CHANGELOG](CHANGELOG.md); compare
+your files with the new examples in `/usr/local/share/logs/`.
+
+Upgrading from 0.1.0: the installer no longer asks questions and ignores the
+old `LOGS_SMB_*` environment variables. A first run creates `install.conf`;
+copy your share, users and passwords into it and run `sudo logs-install
+--apply`. Mount lines that an older installer wrote are replaced.
 
 ## Uninstall
 
@@ -331,7 +400,9 @@ ansible-playbook -i /etc/logs/inventory.yml retention.yml --check
 ### Semaphore
 
 Install with `--no-timers` on the Semaphore host so that it has the mounts
-and, if you want it there, the web UI. Then in Semaphore:
+and, if you want it there, the web UI. Set `LOGS_RW_OWNER=semaphore` (or
+whichever user Semaphore runs as) in `/etc/logs/install.conf` so that user can
+write to the read-write mount. Then in Semaphore:
 
 1. **Repository**: this repository over HTTPS, branch `main` (or a release tag).
 2. **Inventory**: your existing inventory.
@@ -530,7 +601,8 @@ credentials.
   Protect its SSH key (`/var/lib/logs-collector/.ssh/`) accordingly.
 - **Syslog receiver**: syslog is unauthenticated. Restrict senders with
   `logs_syslog_allowed_senders` and your firewall.
-- **Credentials**: SMB passwords live only in `/etc/logs/*.cred` (mode 600).
+- **Credentials**: SMB passwords live only in `/etc/logs/install.conf` and the
+  `/etc/logs/*.cred` files made from it (all mode 600, owner root).
   The SMTP password comes from the environment. Neither belongs in git.
 - **Offsite copies and snapshots** of the share carry the same secrets.
 

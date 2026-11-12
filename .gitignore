@@ -17,3 +17,6 @@ __pycache__/
 *.pyc
 *.retry
 /webui/logs-webui
+
+# Real mount settings (hold SMB passwords): never commit
+/install.conf

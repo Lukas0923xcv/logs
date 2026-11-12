@@ -16,7 +16,7 @@ for arch in amd64 arm64; do
 done
 
 printf '%s\n' "$version" > dist/bundle/VERSION
-cp -R ansible systemd helpers config.example.env LICENSE README.md dist/bundle/
+cp -R ansible systemd helpers config.example.env install.example.conf install.sh LICENSE README.md dist/bundle/
 find dist/bundle -name '__pycache__' -prune -exec rm -rf {} +
 # Site files must never end up in a release, even when they exist locally.
 rm -f dist/bundle/ansible/inventory.yml dist/bundle/ansible/group_vars/all.yml

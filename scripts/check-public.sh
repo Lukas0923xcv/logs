@@ -17,7 +17,7 @@ if out=$(git grep -n -I -E "$private_ip" -- . ':!scripts/check-public.sh' ':!web
     bad=1
 fi
 
-if out=$(git ls-files | grep -E '(^|/)(inventory\.(yml|ini)|private-denylist\.txt|host_vars/|.*\.cred|htpasswd)$|group_vars/[^/]*[^e]\.yml$|(^|/)[^/]*\.env$' | grep -v -E '\.example\.(yml|env)$'); then
+if out=$(git ls-files | grep -E '(^|/)(inventory\.(yml|ini)|install\.conf|private-denylist\.txt|host_vars/|.*\.cred|htpasswd)$|group_vars/[^/]*[^e]\.yml$|(^|/)[^/]*\.env$' | grep -v -E '\.example\.(yml|env)$'); then
     echo "check-public: site configuration files must not be committed:" >&2
     printf '    %s\n' "$out" >&2
     bad=1
