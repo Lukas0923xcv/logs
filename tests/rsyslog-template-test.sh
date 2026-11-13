@@ -3,36 +3,46 @@
 # the result with `rsyslogd -N1`. A port of 0 must switch that protocol off
 # completely: no module, no listener, no $AllowedSender line.
 #
-#   tests/rsyslog-template-test.sh      # needs ansible-core and rsyslog
+#   tests/rsyslog-template-test.sh      # needs ansible-core, rsyslog, and root or passwordless sudo
+#                                       # (it briefly installs a file into /etc/rsyslog.d)
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 role=$repo/ansible/roles/rsyslog_receiver
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "ok: $*"; }
 
 command -v rsyslogd >/dev/null || fail "rsyslogd is not installed (apt install rsyslog)"
+[ -d /etc/rsyslog.d ] || fail "/etc/rsyslog.d does not exist"
+SUDO=""
+[ "$(id -u)" -eq 0 ] || SUDO="sudo -n"
+
+# The rendered file is installed into /etc/rsyslog.d and checked with a plain
+# `rsyslogd -N1`, exactly like the role does. (Files elsewhere, for example in
+# /tmp, cannot be read by rsyslogd where Ubuntu's AppArmor profile is active.)
+# The file is removed again when the test ends.
+etcfile=/etc/rsyslog.d/90-logs-archive-template-test.conf
+trap 'rm -rf "$work"; $SUDO rm -f "$etcfile"' EXIT
 
 # render <name> <udp port> <tcp port>: renders the template to $work/<name>.conf
-# and builds a main config around it, so that the check sees a complete setup.
 render() {
     (cd "$repo/ansible" && ANSIBLE_NOCOLOR=1 ansible localhost -m template \
         -a "src=$role/templates/30-logs-receiver.conf.j2 dest=$work/$1.conf" \
         -e "@$role/defaults/main.yml" \
         -e "{\"logs_syslog_udp_port\": $2, \"logs_syslog_tcp_port\": $3, \"logs_syslog_spool\": \"$work/spool\", \"logs_syslog_spool_group\": \"adm\", \"logs_syslog_allowed_senders\": [\"192.0.2.1\", \"198.51.100.0/24\"]}" \
         > "$work/$1.render" 2>&1) || { cat "$work/$1.render"; fail "rendering $1 failed"; }
-    {
-        echo 'module(load="builtin:omfile")'
-        echo '*.* /dev/null'
-        echo "\$IncludeConfig $work/$1.conf"
-    } > "$work/$1.main"
 }
-check() { # check <name>: the configuration must pass rsyslogd -N1
-    rsyslogd -N1 -f "$work/$1.main" > "$work/$1.out" 2>&1 || { cat "$work/$1.out"; fail "rsyslogd -N1 rejects the $1 configuration"; }
+check() { # check <name>: the complete configuration must pass rsyslogd -N1
+    $SUDO install -m 0644 "$work/$1.conf" "$etcfile"
+    if $SUDO rsyslogd -N1 > "$work/$1.out" 2>&1; then rc=0; else rc=$?; fi
+    $SUDO rm -f "$etcfile"
+    [ "$rc" -eq 0 ] || { cat "$work/$1.out"; fail "rsyslogd -N1 rejects the $1 configuration"; }
 }
 has() { grep -q -- "$2" "$work/$1.conf"; }
+
+# The installed rsyslog configuration itself must be fine, or the checks below prove nothing.
+$SUDO rsyslogd -N1 > "$work/baseline.out" 2>&1 || { cat "$work/baseline.out"; fail "rsyslogd -N1 already fails without the test file"; }
 
 render both 514 514
 check both
