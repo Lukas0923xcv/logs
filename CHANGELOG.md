@@ -5,6 +5,26 @@ All notable changes are listed here. Versions follow
 variables are listed under "Configuration" for each version, so you can
 compare your files in `/etc/logs/` after an upgrade.
 
+## [0.2.1] - 2026-11-13
+
+### Fixed
+
+- `rsyslog_receiver` role: with `logs_syslog_udp_port` or
+  `logs_syslog_tcp_port` set to `0`, the template still loaded `imudp` and
+  `imtcp`. `rsyslogd -N1` then failed with "module loaded, but no listeners
+  defined", and so did the task "Check the complete rsyslog configuration".
+  Now a module is loaded only for a protocol whose port is above 0, and the
+  `$AllowedSender UDP` / `TCP` lines are written only for enabled protocols.
+- The role stops with a clear message, before it changes anything, if both
+  ports are `0`.
+- New test `tests/rsyslog-template-test.sh` (also run in CI) renders the
+  template for UDP only, TCP only and both, and checks each with
+  `rsyslogd -N1`.
+
+### Configuration
+
+No new variables. Documented: a port of `0` turns that protocol off.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added
@@ -122,6 +142,7 @@ Syslog receiver role: `logs_syslog_spool`, `logs_syslog_udp_port`,
 `logs_syslog_allowed_senders`, `logs_syslog_spool_group`,
 `logs_syslog_spool_max_age`.
 
+[0.2.1]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.1.0

@@ -4,12 +4,20 @@
 # The day comes from the time of reception on this host, so each message
 # lands in exactly one day. The collector imports the finished days.
 
+{% if logs_syslog_udp_port | int > 0 %}
 module(load="imudp")
+{% endif %}
+{% if logs_syslog_tcp_port | int > 0 %}
 module(load="imtcp")
+{% endif %}
 
 {% for sender in logs_syslog_allowed_senders %}
+{% if logs_syslog_udp_port | int > 0 %}
 $AllowedSender UDP, {{ sender }}
+{% endif %}
+{% if logs_syslog_tcp_port | int > 0 %}
 $AllowedSender TCP, {{ sender }}
+{% endif %}
 {% endfor %}
 
 template(name="LogsArchiveFile" type="string"

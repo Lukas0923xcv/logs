@@ -598,6 +598,16 @@ logs_syslog_names: {"192.0.2.1": "firewall"}
 The receiver writes one file per sender and day; the collector imports the
 finished day as `raw/.../firewall/syslog.log`.
 
+Both UDP and TCP listen on port 514 by default. Change the ports with
+`logs_syslog_udp_port` and `logs_syslog_tcp_port`. A port of `0` turns that
+protocol off completely (no listener, no module, no allowed-sender lines);
+at least one of the two must be above 0, otherwise the role stops with a
+message before it changes anything. For example, TCP only:
+
+```bash
+sudo ansible-playbook /usr/local/share/logs/ansible/syslog-receiver.yml -e '{"logs_syslog_udp_port": 0, "logs_syslog_allowed_senders": ["192.0.2.1"]}'
+```
+
 ## Security notes
 
 Logs routinely contain secrets and personal data: tokens in URLs, passwords

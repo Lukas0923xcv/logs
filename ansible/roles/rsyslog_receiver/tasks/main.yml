@@ -1,4 +1,13 @@
 ---
+- name: Check that at least one protocol is enabled
+  ansible.builtin.assert:
+    that: (logs_syslog_udp_port | int > 0) or (logs_syslog_tcp_port | int > 0)
+    fail_msg: >-
+      logs_syslog_udp_port and logs_syslog_tcp_port are both 0, so the receiver would
+      listen on nothing. Set at least one of them to a port number (a port of 0 turns
+      that protocol off).
+    quiet: true
+
 - name: Install rsyslog
   ansible.builtin.apt:
     name: rsyslog

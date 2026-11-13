@@ -36,7 +36,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends ansible-core zstd shellcheck
+          sudo apt-get install -y -qq --no-install-recommends ansible-core zstd shellcheck rsyslog
       - name: Shell scripts
         run: shellcheck install.sh helpers/*.sh scripts/*.sh tests/*.sh .githooks/*
       - name: Python modules compile
@@ -46,6 +46,8 @@ jobs:
         run: ansible-playbook --syntax-check collect.yml retention.yml syslog-receiver.yml
       - name: End-to-end test with generated data
         run: tests/integration.sh
+      - name: Syslog receiver template (UDP only, TCP only, both ports 0)
+        run: tests/rsyslog-template-test.sh
 
   hygiene:
     name: Secrets and public-repository checks
