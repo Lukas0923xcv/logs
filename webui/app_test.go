@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -71,7 +73,7 @@ func testApp(t *testing.T, mutate func(*config)) (*app, string) {
 	write(t, filepath.Dir(dir)+"/secret.txt", "outside")
 
 	cfg := config{DataDir: dir, Title: "test", IndexRefresh: time.Hour, FilterTimeout: 5 * time.Second,
-		FilterMax: 10, PageBytes: 4096, ArchiveStreams: 1, ZstdMaxWindow: 32 << 20}
+		FilterMax: 10, PageBytes: 4096, ArchiveStreams: 1, ZipStreams: 2, ZstdMaxWindow: 32 << 20}
 	if mutate != nil {
 		mutate(&cfg)
 	}
@@ -235,4 +237,181 @@ func TestHealthAndAuth(t *testing.T) {
 	if _, err := loadBasicAuth(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Error("a missing auth file must stop the start")
 	}
+}
+
+// zipEntries downloads a zip and returns name -> content.
+func zipEntries(t *testing.T, a *app, target string) (map[string]string, *http.Response) {
+	t.Helper()
+	res, body := get(t, a, "GET", target)
+	if res.StatusCode != 200 {
+		return nil, res
+	}
+	zr, err := zip.NewReader(bytes.NewReader([]byte(body)), int64(len(body)))
+	if err != nil {
+		t.Fatalf("%s: not a valid zip: %v", target, err)
+	}
+	out := map[string]string{}
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := io.ReadAll(rc) // also verifies the CRC
+		rc.Close()
+		if err != nil {
+			t.Fatalf("%s: reading %s: %v", target, f.Name, err)
+		}
+		out[f.Name] = string(b)
+	}
+	return out, res
+}
+
+func TestZipRawDay(t *testing.T) {
+	a, content := testApp(t, nil)
+	other := "second host line\n"
+	write(t, a.cfg.DataDir+"/raw/2025/01/02/web01/docker-app.log", "docker line\n")
+	write(t, a.cfg.DataDir+"/raw/2025/01/02/db01/journald.log", other)
+
+	all, res := zipEntries(t, a, "/zip/2025-01-02")
+	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "application/zip" ||
+		!strings.Contains(res.Header.Get("Content-Disposition"), `filename="logs-2025-01-02.zip"`) {
+		t.Fatalf("download all: status %d, headers %v", res.StatusCode, res.Header)
+	}
+	want := map[string]string{
+		"2025-01-02/web01/journald.log":   content,
+		"2025-01-02/web01/docker-app.log": "docker line\n",
+		"2025-01-02/db01/journald.log":    other,
+	}
+	if len(all) != len(want) {
+		t.Fatalf("download all: got %d entries, want %d: %v", len(all), len(want), keys(all))
+	}
+	for n, c := range want {
+		if all[n] != c {
+			t.Errorf("download all: %s differs", n)
+		}
+	}
+
+	// two files out of three
+	sel, res := zipEntries(t, a, "/zip/2025-01-02?sel=1&f=web01/docker-app.log&f=db01/journald.log")
+	if res.StatusCode != 200 || len(sel) != 2 || sel["2025-01-02/db01/journald.log"] != other ||
+		!strings.Contains(res.Header.Get("Content-Disposition"), "selected") {
+		t.Errorf("selection: status %d, entries %v", res.StatusCode, keys(sel))
+	}
+	// a whole host
+	hostOnly, _ := zipEntries(t, a, "/zip/2025-01-02?h=web01")
+	if len(hostOnly) != 2 || hostOnly["2025-01-02/db01/journald.log"] != "" {
+		t.Errorf("host selection: %v", keys(hostOnly))
+	}
+	// a missing file is reported inside the zip, existing ones are delivered
+	partial, _ := zipEntries(t, a, "/zip/2025-01-02?f=db01/journald.log&f=db01/gone.log")
+	if !strings.Contains(partial["2025-01-02/MISSING.txt"], "db01/gone.log") || partial["2025-01-02/db01/journald.log"] != other {
+		t.Errorf("missing file not reported: %v", keys(partial))
+	}
+	if _, res = zipEntries(t, a, "/zip/2025-01-02?f=db01/gone.log"); res.StatusCode != 404 {
+		t.Errorf("only missing files: status %d, want 404", res.StatusCode)
+	}
+	// HEAD does not stream
+	if res, body := get(t, a, "HEAD", "/zip/2025-01-02"); res.StatusCode != 200 || body != "" {
+		t.Errorf("HEAD: status %d, body %d bytes", res.StatusCode, len(body))
+	}
+}
+
+func TestZipArchivedDay(t *testing.T) {
+	a, content := testApp(t, nil)
+	all, res := zipEntries(t, a, "/zip/2025-01-01")
+	if res.StatusCode != 200 || len(all) != 2 || all["2025-01-01/db01/other.log"] != content || all["2025-01-01/web01/journald.log"] != content {
+		t.Fatalf("archived day, all: status %d, entries %v", res.StatusCode, keys(all))
+	}
+	one, _ := zipEntries(t, a, "/zip/2025-01-01?sel=1&f=db01/other.log")
+	if len(one) != 1 || one["2025-01-01/db01/other.log"] != content {
+		t.Errorf("archived selection: %v", keys(one))
+	}
+	host, _ := zipEntries(t, a, "/zip/2025-01-01?h=web01")
+	if len(host) != 1 || host["2025-01-01/web01/journald.log"] != content {
+		t.Errorf("archived host selection: %v", keys(host))
+	}
+	part, _ := zipEntries(t, a, "/zip/2025-01-01?f=db01/other.log&f=db01/gone.log")
+	if !strings.Contains(part["2025-01-01/MISSING.txt"], "db01/gone.log") || part["2025-01-01/db01/other.log"] != content {
+		t.Errorf("archived: missing file not reported: %v", keys(part))
+	}
+	if _, res = zipEntries(t, a, "/zip/2025-01-01?f=nope/nope.log"); res.StatusCode != 404 {
+		t.Errorf("archived, nothing found: status %d, want 404", res.StatusCode)
+	}
+	if _, res = zipEntries(t, a, "/zip/2024-12-31"); res.StatusCode != 404 {
+		t.Errorf("unknown day: status %d, want 404", res.StatusCode)
+	}
+}
+
+func TestZipRejectsBadInput(t *testing.T) {
+	a, _ := testApp(t, nil)
+	for _, target := range []string{
+		"/zip/2025-01-02?sel=1",                    // nothing selected
+		"/zip/2025-01-02?f=",                       // empty value
+		"/zip/2025-01-02?f=web01",                  // no file part
+		"/zip/2025-01-02?f=../secret.txt",          // traversal
+		"/zip/2025-01-02?f=web01/../../secret.txt", // traversal
+		"/zip/2025-01-02?f=web01/sub/journald.log", // extra path part
+		"/zip/2025-01-02?f=%2e%2e/%2e%2e",          // encoded traversal
+		"/zip/2025-01-02?h=..",                     // bad host
+		"/zip/2025-01-02?h=web01%2f..%2f..",        // bad host
+		"/zip/..%2f..%2fetc",                       // bad day
+		"/zip/2025-13-40",                          // bad day
+	} {
+		res, body := get(t, a, "GET", target)
+		if res.StatusCode != 400 || strings.Contains(body, "outside") {
+			t.Errorf("%s: status %d, want 400 from the input validation", target, res.StatusCode)
+		}
+	}
+	// too many picks
+	var q strings.Builder
+	for i := 0; i <= maxZipPicks; i++ {
+		fmt.Fprintf(&q, "&f=web01/f%d.log", i)
+	}
+	if res, _ := get(t, a, "GET", "/zip/2025-01-02?x=1"+q.String()); res.StatusCode != 400 {
+		t.Errorf("too many files: status %d, want 400", res.StatusCode)
+	}
+	// a symlink in a raw day must not leak a file from outside
+	link := filepath.Join(a.cfg.DataDir, "raw/2025/01/02/web01/link.log")
+	if err := os.Symlink(filepath.Join(filepath.Dir(a.cfg.DataDir), "secret.txt"), link); err == nil {
+		all, _ := zipEntries(t, a, "/zip/2025-01-02")
+		for n, c := range all {
+			if strings.Contains(c, "outside") {
+				t.Errorf("symlinked file leaked into the zip as %s", n)
+			}
+		}
+		explicit, _ := zipEntries(t, a, "/zip/2025-01-02?f=web01/link.log&f=web01/journald.log")
+		for n, c := range explicit {
+			if strings.Contains(c, "outside") {
+				t.Errorf("explicit symlink leaked as %s", n)
+			}
+		}
+	}
+	if res, _ := get(t, a, "POST", "/zip/2025-01-02"); res.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST: status %d, want 405", res.StatusCode)
+	}
+}
+
+func TestDayPageOffersZip(t *testing.T) {
+	a, _ := testApp(t, nil)
+	for _, day := range []string{"2025-01-02", "2025-01-01"} {
+		_, body := get(t, a, "GET", "/day/"+day)
+		for _, want := range []string{`href="/zip/` + day + `"`, `name="f" value="web01/journald.log"`, `/static/select.js`, `name="sel"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: day page lacks %q", day, want)
+			}
+		}
+	}
+	res, _ := get(t, a, "GET", "/static/select.js")
+	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Errorf("select.js not served or CSP lacks script-src 'self'")
+	}
+}
+
+func keys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

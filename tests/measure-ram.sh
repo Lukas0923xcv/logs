@@ -23,4 +23,9 @@ curl -fs "$url/view/$latest/host01/journald.log?tail=1" >/dev/null; echo -n "tai
 m=$(curl -fs "$url/view/$latest/host01/journald.log?q=id%3Dffff" | grep -c 'class="off"' || true)
 echo -n "filter whole file ($m hits):   "; rss
 n=$(curl -fs "$url/extract/$arch/host01/journald.log" | wc -c); echo -n "extract from archive ($((n >> 20)) MiB): "; rss
+n=$(curl -fs "$url/zip/$latest" -o /tmp/measure-zip.zip -w '%{size_download}'); echo -n "zip of a raw day ($((n >> 20)) MiB zip):  "; rss
+python3 -I -c 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print("   zip verified:", len(z.namelist()), "entries, CRC ok")' /tmp/measure-zip.zip
+n=$(curl -fs "$url/zip/$arch?sel=1&f=host01/journald.log&f=host02/journald.log" -o /tmp/measure-zip.zip -w '%{size_download}'); echo -n "zip of 2 files from archive:   "; rss
+python3 -I -c 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print("   zip verified:", len(z.namelist()), "entries, CRC ok")' /tmp/measure-zip.zip
+rm -f /tmp/measure-zip.zip
 sleep 5;                                                   echo -n "idle again:                    "; rss

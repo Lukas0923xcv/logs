@@ -31,6 +31,7 @@ type config struct {
 	FilterMax      int
 	PageBytes      int64
 	ArchiveStreams int
+	ZipStreams     int
 	ZstdMaxWindow  uint64
 }
 
@@ -74,6 +75,7 @@ func loadConfig() config {
 		FilterMax:      int(envInt("LOGS_FILTER_MAX_RESULTS", 500)),
 		PageBytes:      envInt("LOGS_PAGE_BYTES", 64*1024),
 		ArchiveStreams: int(envInt("LOGS_ARCHIVE_STREAMS", 1)),
+		ZipStreams:     int(envInt("LOGS_ZIP_STREAMS", 2)),
 		ZstdMaxWindow:  uint64(envInt("LOGS_ZSTD_MAX_WINDOW_MB", 32)) << 20,
 	}
 }

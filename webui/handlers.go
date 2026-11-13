@@ -25,13 +25,14 @@ type app struct {
 	auth    *basicAuth
 	tpl     map[string]*template.Template
 	extract chan struct{} // limits concurrent archive decompression
+	zips    chan struct{} // limits concurrent zip downloads of raw days
 }
 
 func newApp(cfg config) (*app, error) {
 	if info, err := os.Stat(cfg.DataDir); err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("data directory %s does not exist (LOGS_DATA_DIR)", cfg.DataDir)
 	}
-	a := &app{cfg: cfg, extract: make(chan struct{}, cfg.ArchiveStreams)}
+	a := &app{cfg: cfg, extract: make(chan struct{}, max(cfg.ArchiveStreams, 1)), zips: make(chan struct{}, max(cfg.ZipStreams, 1))}
 	if cfg.AuthFile != "" {
 		var err error
 		if a.auth, err = loadBasicAuth(cfg.AuthFile); err != nil {
@@ -67,6 +68,7 @@ func (a *app) handler() http.Handler {
 	mux.HandleFunc("GET /view/{day}/{host}/{file}", a.view)
 	mux.HandleFunc("GET /raw/{day}/{host}/{file}", a.downloadRaw)
 	mux.HandleFunc("GET /archive/{day}", a.downloadArchive)
+	mux.HandleFunc("GET /zip/{day}", a.downloadZip)
 	mux.HandleFunc("GET /extract/{day}/{host}/{file}", a.extractFile)
 	mux.HandleFunc("GET /healthz", a.healthz)
 	static, _ := fs.Sub(assets, "static")
@@ -94,7 +96,7 @@ func (a *app) middleware(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		h.Set("Cache-Control", "no-store")
 
 		switch {
@@ -345,6 +347,7 @@ func (a *app) day(w http.ResponseWriter, r *http.Request) {
 	ix := a.index.get()
 	a.render(w, 200, "day", day, "days", map[string]any{
 		"Day": d, "Hosts": rows, "Prev": neighbour(ix, day, -1), "Next": neighbour(ix, day, 1),
+		"CanZip": d.HasRaw || d.ArchiveBytes >= 0,
 	})
 }
 

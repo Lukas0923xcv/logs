@@ -15,19 +15,27 @@
   {{if eq .Day.State "expired"}}Raw logs and archive are gone; only the statistics remain.{{end}}
   {{if ge .Day.ArchiveBytes 0}}<a href="/archive/{{.Day.Day}}.tar.zst">Download the whole archive ({{bytes .Day.ArchiveBytes}})</a>{{end}}
 </p>
+{{if .CanZip}}
+<p><a class="btn primary" href="/zip/{{.Day.Day}}">Download all as zip</a>
+  <span class="muted small">Every host and source of this day in one zip. Or tick sources below and download only those.</span></p>
+<form method="get" action="/zip/{{.Day.Day}}" id="zipform">
+<input type="hidden" name="sel" value="1">
+{{end}}
 
 {{range .Hosts}}{{$host := .Name}}
-<section class="card">
-  <h2>{{.Name}}
+<section class="card" data-host="{{.Name}}">
+  <h2>{{if $.Data.CanZip}}<input type="checkbox" class="host-toggle js-only" hidden aria-label="Select all sources of {{.Name}}"> {{end}}{{.Name}}
     {{if eq .Status "ok"}}<span class="badge ok">ok</span>{{else}}<span class="badge bad">{{.Status}}</span>{{end}}
     {{if .Origin}}<span class="badge">{{.Origin}}</span>{{end}}
+    {{if $.Data.CanZip}}<a class="small hostzip" href="/zip/{{$.Data.Day.Day}}?h={{.Name}}">Download host as zip</a>{{end}}
   </h2>
   {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
   {{if .Files}}
   <div class="scroll"><table>
-    <thead><tr><th>Source</th><th class="n">Size</th><th class="n">Lines</th><th class="n">Errors</th><th class="n">Warnings</th><th>Actions</th></tr></thead>
+    <thead><tr>{{if $.Data.CanZip}}<th class="pick"></th>{{end}}<th>Source</th><th class="n">Size</th><th class="n">Lines</th><th class="n">Errors</th><th class="n">Warnings</th><th>Actions</th></tr></thead>
     <tbody>
     {{range .Files}}<tr>
+      {{if $.Data.CanZip}}<td class="pick">{{if .Name}}<input type="checkbox" name="f" value="{{$host}}/{{.Name}}" data-bytes="{{.Bytes}}" aria-label="Select {{.Source}} of {{$host}}">{{end}}</td>{{end}}
       <td>{{.Source}}{{if .Failed}} <span class="badge bad">failed</span> <span class="muted">{{.Msg}}</span>{{end}}</td>
       <td class="n">{{bytes .Bytes}}</td>
       <td class="n">{{if .HasStats}}{{num .Lines}}{{end}}</td>
@@ -50,6 +58,16 @@
 </section>
 {{else}}
 <p class="muted">No hosts are recorded for this day.</p>
+{{end}}
+{{if .CanZip}}
+<div class="zipbar">
+  <button type="submit">Download selected as zip</button>
+  <button type="button" class="js-only" hidden data-act="all">Select all</button>
+  <button type="button" class="js-only" hidden data-act="none">Select none</button>
+  <span id="zipcount" class="muted small" aria-live="polite"></span>
+</div>
+</form>
+<script src="/static/select.js" defer></script>
 {{end}}
 {{end}}
 {{template "foot" .}}{{end}}

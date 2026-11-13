@@ -5,6 +5,27 @@ All notable changes are listed here. Versions follow
 variables are listed under "Configuration" for each version, so you can
 compare your files in `/etc/logs/` after an upgrade.
 
+## [0.2.0] - 2026-11-13
+
+### Added
+
+- Web UI: zip downloads of a day. "Download all as zip" on the day page, a
+  checkbox per source and per host with "Download selected as zip", and
+  "Download host as zip". Works for raw days and for archived days (the
+  `.tar.zst` is read once and only the selected files are written). Streamed
+  with fast deflate, so memory stays flat (measured: 29 MiB resident while
+  zipping a day with a 1 GiB file). Missing selected files are listed in
+  `<day>/MISSING.txt`; an empty selection is refused. Endpoint:
+  `GET /zip/<day>` with optional `f=<host>/<file>` and `h=<host>` parameters.
+- Web UI: an optional script, `/static/select.js`, for select all/none, host
+  toggles and a running size. The page works without it. The content security
+  policy now allows scripts from the UI itself (`script-src 'self'`).
+
+### Configuration
+
+Web UI (`/etc/logs/webui.env`): `LOGS_ZIP_STREAMS` (default `2`). The existing
+`LOGS_ARCHIVE_STREAMS` now also limits zips of archived days.
+
 ## [0.1.1] - 2026-11-12
 
 ### Changed
@@ -101,5 +122,6 @@ Syslog receiver role: `logs_syslog_spool`, `logs_syslog_udp_port`,
 `logs_syslog_allowed_senders`, `logs_syslog_spool_group`,
 `logs_syslog_spool_max_age`.
 
+[0.2.0]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Lukas0923xcv/logs/releases/tag/v0.1.0

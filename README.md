@@ -276,7 +276,8 @@ installer.
 | `LOGS_FILTER_MAX_RESULTS` | `500` | Text filter stops after this many lines. |
 | `LOGS_FILTER_TIMEOUT` | `15s` | Text filter stops after this time. |
 | `LOGS_PAGE_BYTES` | `65536` | Size of one viewer page. |
-| `LOGS_ARCHIVE_STREAMS` | `1` | Parallel downloads of single files out of archives. |
+| `LOGS_ARCHIVE_STREAMS` | `1` | Parallel downloads out of archives (single files and zips of archived days). |
+| `LOGS_ZIP_STREAMS` | `2` | Parallel zip downloads of raw days. Further requests wait up to 20 seconds, then get "try again". |
 | `LOGS_ZSTD_MAX_WINDOW_MB` | `32` | Largest zstd window the UI will decompress. |
 
 After a change: `sudo systemctl restart logs-webui`.
@@ -463,14 +464,28 @@ Open `http://127.0.0.1:8484/` on the host, or tunnel to it:
   - Raw days: view page by page, jump to the tail, filter by text, download.
   - Archived days: download a single file (decompressed on the fly) or the
     whole `.tar.zst`.
+  - **Zip downloads** (raw and archived days): "Download all as zip" gives
+    every host and source of the day in one zip. Tick sources (per file, or
+    the box next to a host) and use "Download selected as zip" to get only
+    those; "Download host as zip" gets one host. The zip is streamed while
+    the files are read, so memory does not grow with its size, and it is
+    compressed with fast deflate. Entries are named
+    `<day>/<host>/<source>.log`; files that were selected but are missing
+    are listed in `<day>/MISSING.txt`. For an archived day the `.tar.zst` is
+    read once, in order, and only the selected files are written to the zip.
+    An empty selection is refused, never treated as "everything". The
+    checkboxes, the per-host links and the download work without
+    JavaScript; the small script (`/static/select.js`) only adds "Select
+    all/none", host toggles and a running size.
 - **Filter**: case-insensitive text search in one file. It streams results,
   stops at `LOGS_FILTER_MAX_RESULTS` lines or after `LOGS_FILTER_TIMEOUT`, and
   then offers to continue from where it stopped.
 - **Health**: `GET /healthz` returns JSON and status 200, or 503 when the data
   directory cannot be read. It needs no login.
 
-The UI has no JavaScript and no write or delete actions; only `GET` and
-`HEAD` are answered. Statistics come from the manifests only. Log files are
+The UI needs no JavaScript (one optional 50-line script helps with the
+zip selection) and has no write or delete actions; only `GET` and `HEAD` are
+answered. Statistics come from the manifests only. Log files are
 never scanned for them.
 
 Memory, measured on amd64 with a generated share (730 days, 15 hosts, one
@@ -483,9 +498,12 @@ Memory, measured on amd64 with a generated share (730 days, 15 hosts, one
 | Downloading the 1 GiB raw file | 21 MiB |
 | Filtering the whole 1 GiB file | 22 MiB |
 | Extracting the 600 MiB file from the archive (peak) | 52 MiB |
+| Zip of a raw day with a 1 GiB file (215 MiB zip) | 29 MiB |
+| Zip of two files out of an archive (peak) | 53 MiB |
 | Idle again | 17 MiB |
 
-The same requests also pass inside a container limited to 64 MB without swap.
+The same requests also pass inside a container limited to 64 MB without swap,
+including a raw zip, an archive zip and a third zip running at the same time.
 Reproduce with `tests/gen-testdata.py` and `tests/measure-ram.sh`.
 
 The systemd unit sets `MemoryMax=64M`, `CPUQuota=50%`, `NoNewPrivileges`,
